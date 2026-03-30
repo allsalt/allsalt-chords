@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>allsalt chord library</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0f0f0f; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; -webkit-tap-highlight-color: transparent; }
+  #root { min-height: 100vh; }
+  @media (max-width: 600px) {
+    .header-bar { flex-direction: column !important; align-items: flex-start !important; gap: 8px !important; padding: 12px 16px !important; }
+    .main-content { padding: 16px !important; }
+    .player-btn { padding: 20px 28px !important; min-width: 140px !important; font-size: 18px !important; }
+    .section-card { padding: 14px !important; }
+    .chord-grid { gap: 2px !important; }
+    .editor-panel { padding: 16px !important; }
+    .editor-inputs { flex-direction: column !important; }
+    .editor-inputs > * { width: 100% !important; min-width: unset !important; flex: unset !important; }
+  }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+// ─── Constants ───────────────────────────────────────────────────────
+const STRING_LABELS = ["E", "A", "D", "G", "B", "e"];
+const NUM_FRETS_DISPLAY = 5;
+const STORAGE_KEY = "band-chord-library-v3";
+
+const COLORS = {
+  bg: "#0f0f0f",
+  surface: "#1a1a1a",
+  surfaceHover: "#222",
+  border: "#333",
+  text: "#e8e8e8",
+  textMuted: "#888",
+  textDim: "#555",
+  accent: "#4ade80",
+  root: "#ef4444",
+  dot: "#e8e8e8",
+  open: "#4ade80",
+  muted: "#666",
+  fretWire: "#555",
+  string: "#999",
+  nut: "#ccc",
+};
+
+// ─── SVG Chord Diagram ──────────────────────────────────────────────
+function ChordDiagram({ name, frets, root, startFret = 1, size = "md", onRemove }) {
+  const scale = size === "sm" ? 0.7 : size === "lg" ? 1.3 : 1;
+  const W = 130 * scale;
+  const H = 180 * scale;
+  const padTop = 40 * scale;
+  const padBottom = 14 * scale;
+  const padLeft = 30 * scale;
+  const padRight = 14 * scale;
+  const fretCount = NUM_FRETS_DISPLAY;
+  const stringCount = 6;
+  const fretSpacing = (H - padTop - padBottom) / fretCount;
+  const stringSpacing = (W - padLeft - padRight) / (stringCount - 1);
+  const dotR = 7.5 * scale;
+  const fontSize = 11 * scale;
+  const nameFontSize = 14 * scale;
+  const isNut = startFret === 1;
+
+  const fretNumbers = [];
+  for (let i = 0; i < fretCount; i++) fretNumbers.push(startFret + i);
+
+  return (
+    <div style={{
+      display: "inline-flex", flexDirection: "column", alignItems: "center",
+      position: "relative", margin: 6 * scale + "px",
+    }}>
+      <div style={{
+        color: COLORS.text, fontSize: nameFontSize + "px", fontWeight: 700,
+        fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+        marginBottom: 4 * scale + "px", letterSpacing: "0.5px",
+      }}>
+        {name}
+      </div>
+
+      <svg width={W} height={H} viewBox={"0 0 " + W + " " + H}>
+        {isNut ? (
+          <rect x={padLeft - 2} y={padTop - 4 * scale}
+            width={stringSpacing * (stringCount - 1) + 4} height={4 * scale}
+            fill={COLORS.nut} rx={1} />
+        ) : (
+          <text x={padLeft - 8 * scale} y={padTop + fretSpacing * 0.5}
+            fill={COLORS.accent} fontSize={fontSize * 1.05} fontWeight="700"
+            fontFamily="'JetBrains Mono', monospace" textAnchor="end" dominantBaseline="middle">
+            {startFret}
+          </text>
+        )}
+
+        {fretNumbers.map(function(fNum, i) {
+          return (
+            <text key={"fn-" + i} x={padLeft - 8 * scale} y={padTop + (i + 0.5) * fretSpacing}
+              fill={isNut ? COLORS.textDim : (i === 0 ? "transparent" : COLORS.textDim)}
+              fontSize={fontSize * 0.75}
+              fontFamily="'JetBrains Mono', monospace" textAnchor="end" dominantBaseline="middle">
+              {fNum}
+            </text>
+          );
+        })}
+
+        {Array.from({ length: fretCount + 1 }).map(function(_, i) {
+          return <line key={"fret-" + i} x1={padLeft} y1={padTop + i * fretSpacing}
+            x2={padLeft + stringSpacing * (stringCount - 1)} y2={padTop + i * fretSpacing}
+            stroke={COLORS.fretWire} strokeWidth={1} />;
+        })}
+
+        {Array.from({ length: stringCount }).map(function(_, i) {
+          return <line key={"str-" + i} x1={padLeft + i * stringSpacing} y1={padTop}
+            x2={padLeft + i * stringSpacing} y2={padTop + fretCount * fretSpacing}
+            stroke={COLORS.string} strokeWidth={1 + (5 - i) * 0.18} />;
+        })}
+
+        {frets.map(function(fret, i) {
+          const x = padLeft + i * stringSpacing;
+          const isRootNote = root && root[i] !== null && root[i] !== undefined;
+
+          if (fret === -1) {
+            return (
+              <text key={"m-" + i} x={x} y={padTop - 14 * scale}
+                fill={COLORS.muted} fontSize={fontSize * 1.1}
+                fontFamily="'JetBrains Mono', monospace" textAnchor="middle" dominantBaseline="middle">
+                ×
+              </text>
+            );
+          }
+          if (fret === 0) {
+            return (
+              <circle key={"o-" + i} cx={x} cy={padTop - 14 * scale} r={dotR * 0.6}
+                fill="none" stroke={isRootNote ? COLORS.root : COLORS.open} strokeWidth={1.8} />
+            );
+          }
+
+          const displayFret = fret - startFret + 1;
+          if (displayFret < 1 || displayFret > fretCount) return null;
+          const y = padTop + (displayFret - 0.5) * fretSpacing;
+
+          return (
+            <circle key={"d-" + i} cx={x} cy={y} r={dotR}
+              fill={isRootNote ? COLORS.root : COLORS.dot} />
+          );
+        })}
+      </svg>
+
+      {onRemove && (
+        <button onClick={onRemove}
+          style={{
+            position: "absolute", top: 0, right: -2,
+            background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)",
+            color: "#ef4444", borderRadius: "50%", width: 20, height: 20,
+            fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center",
+            justifyContent: "center", lineHeight: 1, opacity: 0.5,
+          }}
+          onMouseEnter={function(e) { e.target.style.opacity = 1; }}
+          onMouseLeave={function(e) { e.target.style.opacity = 0.5; }}>
+          ×
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── Interactive Fretboard Editor ────────────────────────────────────
+function FretboardEditor({ onSave, onCancel }) {
+  const [frets, setFrets] = useState([-1,-1,-1,-1,-1,-1]);
+  const [rootFlags, setRootFlags] = useState([false,false,false,false,false,false]);
+  const [startFret, setStartFret] = useState(1);
+  const [chordName, setChordName] = useState("");
+  const nameRef = useRef(null);
+
+  useEffect(function() { if (nameRef.current) nameRef.current.focus(); }, []);
+
+  const W = 240, H = 280, padTop = 52, padBottom = 22, padLeft = 48, padRight = 20;
+  const fretCount = NUM_FRETS_DISPLAY, stringCount = 6;
+  const fretSpacing = (H - padTop - padBottom) / fretCount;
+  const stringSpacing = (W - padLeft - padRight) / (stringCount - 1);
+  const dotR = 12;
+  const isNut = startFret === 1;
+
+  const fretNumbers = [];
+  for (let i = 0; i < fretCount; i++) fretNumbers.push(startFret + i);
+
+  function handleFretClick(stringIdx, fretIdx) {
+    setFrets(function(prev) {
+      const next = prev.slice();
+      const actualFret = fretIdx + startFret;
+      next[stringIdx] = next[stringIdx] === actualFret ? -1 : actualFret;
+      return next;
+    });
+  }
+
+  function toggleOpen(stringIdx) {
+    setFrets(function(prev) {
+      const next = prev.slice();
+      next[stringIdx] = next[stringIdx] === 0 ? -1 : 0;
+      return next;
+    });
+  }
+
+  function toggleRoot(stringIdx) {
+    if (frets[stringIdx] === -1) return;
+    setRootFlags(function(prev) {
+      const next = prev.slice();
+      next[stringIdx] = !next[stringIdx];
+      return next;
+    });
+  }
+
+  function buildRoot() {
+    return frets.map(function(f, i) { return (rootFlags[i] && f !== -1) ? f : null; });
+  }
+
+  function clearAll() {
+    setFrets([-1,-1,-1,-1,-1,-1]);
+    setRootFlags([false,false,false,false,false,false]);
+  }
+
+  const canSave = chordName.trim() && !frets.every(function(f) { return f === -1; });
+
+  return (
+    <div className="editor-panel" style={{
+      background: COLORS.surface, border: "1px solid " + COLORS.border, borderRadius: 12,
+      padding: 24, display: "flex", flexDirection: "column", alignItems: "center", gap: 16,
+    }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.text, alignSelf: "flex-start" }}>
+        Add Chord Shape
+      </div>
+
+      <div className="editor-inputs" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", justifyContent: "center", width: "100%" }}>
+        <input ref={nameRef} type="text" placeholder="Chord name (e.g. Am7)"
+          value={chordName} onChange={function(e) { setChordName(e.target.value); }}
+          style={{
+            background: COLORS.bg, border: "1px solid " + COLORS.border, color: COLORS.text,
+            padding: "10px 14px", borderRadius: 8, fontSize: 15,
+            fontFamily: "'JetBrains Mono', monospace", flex: 1, minWidth: 160, outline: "none",
+          }}
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.bg, border: "1px solid " + COLORS.border, borderRadius: 8, padding: "6px 12px" }}>
+          <label style={{ color: COLORS.textMuted, fontSize: 12, whiteSpace: "nowrap" }}>Start fret</label>
+          <button onClick={function() { setStartFret(function(f) { return Math.max(1, f - 1); }); }}
+            style={{ background: "transparent", border: "1px solid " + COLORS.border, color: COLORS.text, width: 28, height: 28, borderRadius: 4, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            -
+          </button>
+          <span style={{ color: COLORS.accent, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 16, minWidth: 24, textAlign: "center" }}>
+            {startFret}
+          </span>
+          <button onClick={function() { setStartFret(function(f) { return Math.min(17, f + 1); }); }}
+            style={{ background: "transparent", border: "1px solid " + COLORS.border, color: COLORS.text, width: 28, height: 28, borderRadius: 4, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            +
+          </button>
+        </div>
+      </div>
+
+      <div style={{ color: COLORS.textMuted, fontSize: 11, textAlign: "center", lineHeight: 1.6 }}>
+        Tap a fret position to place/remove a finger. Tap above the nut to toggle open/muted.
+        <br />Right-click a dot to mark it as the <span style={{ color: COLORS.root, fontWeight: 600 }}>root</span>.
+      </div>
+
+      <svg width={W} height={H} style={{ cursor: "pointer" }}>
+        {STRING_LABELS.map(function(label, i) {
+          return <text key={"label-" + i} x={padLeft + i * stringSpacing} y={H - 4}
+            fill={COLORS.textDim} fontSize={10} fontFamily="'JetBrains Mono', monospace" textAnchor="middle">{label}</text>;
+        })}
+
+        {isNut ? (
+          <rect x={padLeft - 2} y={padTop - 5} width={stringSpacing * (stringCount - 1) + 4} height={5} fill={COLORS.nut} rx={1} />
+        ) : (
+          <text x={padLeft - 10} y={padTop + fretSpacing * 0.5}
+            fill={COLORS.accent} fontSize={13} fontWeight="700"
+            fontFamily="'JetBrains Mono', monospace" textAnchor="end" dominantBaseline="middle">
+            {startFret}
+          </text>
+        )}
+
+        {fretNumbers.map(function(fNum, i) {
+          return <text key={"fn-" + i} x={padLeft - 10} y={padTop + (i + 0.5) * fretSpacing}
+            fill={!isNut && i === 0 ? "transparent" : COLORS.textDim}
+            fontSize={10} fontFamily="'JetBrains Mono', monospace" textAnchor="end" dominantBaseline="middle">{fNum}</text>;
+        })}
+
+        {Array.from({ length: fretCount + 1 }).map(function(_, i) {
+          return <line key={"fret-" + i} x1={padLeft} y1={padTop + i * fretSpacing}
+            x2={padLeft + stringSpacing * (stringCount - 1)} y2={padTop + i * fretSpacing}
+            stroke={COLORS.fretWire} strokeWidth={1} />;
+        })}
+
+        {Array.from({ length: stringCount }).map(function(_, i) {
+          return <line key={"str-" + i} x1={padLeft + i * stringSpacing} y1={padTop}
+            x2={padLeft + i * stringSpacing} y2={padTop + fretCount * fretSpacing}
+            stroke={COLORS.string} strokeWidth={1 + (5 - i) * 0.2} />;
+        })}
+
+        {Array.from({ length: stringCount }).map(function(_, i) {
+          const x = padLeft + i * stringSpacing;
+          const y = padTop - 20;
+          return (
+            <g key={"top-" + i} onClick={function() { toggleOpen(i); }} style={{ cursor: "pointer" }}>
+              <rect x={x - 14} y={y - 14} width={28} height={28} fill="transparent" />
+              {frets[i] === 0 ? (
+                <circle cx={x} cy={y} r={9} fill="none" stroke={rootFlags[i] ? COLORS.root : COLORS.open} strokeWidth={2} />
+              ) : frets[i] === -1 ? (
+                <text x={x} y={y + 1} fill={COLORS.muted} fontSize={18} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" dominantBaseline="middle">×</text>
+              ) : null}
+            </g>
+          );
+        })}
+
+        {Array.from({ length: fretCount }).map(function(_, fretIdx) {
+          return Array.from({ length: stringCount }).map(function(_, strIdx) {
+            const x = padLeft + strIdx * stringSpacing;
+            const y = padTop + (fretIdx + 0.5) * fretSpacing;
+            const actualFret = fretIdx + startFret;
+            const isActive = frets[strIdx] === actualFret;
+            const isRootDot = isActive && rootFlags[strIdx];
+            return (
+              <g key={"cell-" + fretIdx + "-" + strIdx}
+                onClick={function() { handleFretClick(strIdx, fretIdx); }}
+                onContextMenu={function(e) { e.preventDefault(); if (isActive) toggleRoot(strIdx); }}
+                style={{ cursor: "pointer" }}>
+                <rect x={x - stringSpacing / 2.2} y={y - fretSpacing / 2.2}
+                  width={stringSpacing / 1.1} height={fretSpacing / 1.1} fill="transparent" />
+                {isActive
+                  ? <circle cx={x} cy={y} r={dotR} fill={isRootDot ? COLORS.root : COLORS.dot} />
+                  : <circle cx={x} cy={y} r={5} fill={COLORS.fretWire} opacity={0.15} />
+                }
+              </g>
+            );
+          });
+        })}
+      </svg>
+
+      <div style={{ borderTop: "1px solid " + COLORS.border, paddingTop: 14, width: "100%" }}>
+        <div style={{ color: COLORS.textMuted, fontSize: 11, marginBottom: 8, textAlign: "center" }}>Preview</div>
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <ChordDiagram name={chordName || "?"} frets={frets} root={buildRoot()} startFret={startFret} />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+        <button
+          onClick={function() {
+            if (!canSave) return;
+            onSave({ name: chordName.trim(), frets: frets.slice(), root: buildRoot(), startFret: startFret });
+          }}
+          style={{
+            background: canSave ? COLORS.accent : COLORS.textDim,
+            color: COLORS.bg, border: "none", padding: "10px 24px", borderRadius: 8,
+            fontSize: 14, fontWeight: 600, cursor: canSave ? "pointer" : "not-allowed",
+          }}>
+          Add Chord
+        </button>
+        <button onClick={clearAll}
+          style={{ background: "transparent", color: COLORS.textMuted, border: "1px solid " + COLORS.border, padding: "10px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
+          Clear
+        </button>
+        <button onClick={onCancel}
+          style={{ background: "transparent", color: COLORS.textMuted, border: "1px solid " + COLORS.border, padding: "10px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal Overlay ───────────────────────────────────────────────────
+function Modal({ children, onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
+      <div onClick={function(e) { e.stopPropagation(); }} style={{ maxWidth: 500, width: "100%", maxHeight: "90vh", overflowY: "auto", borderRadius: 12 }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── Inline Editable Text ────────────────────────────────────────────
+function EditableText({ value, onSave, style }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(value);
+  const inputRef = useRef(null);
+
+  useEffect(function() { setText(value); }, [value]);
+  useEffect(function() { if (editing && inputRef.current) inputRef.current.focus(); }, [editing]);
+
+  if (editing) {
+    return (
+      <input ref={inputRef} value={text} onChange={function(e) { setText(e.target.value); }}
+        onBlur={function() { if (text.trim()) onSave(text.trim()); setEditing(false); }}
+        onKeyDown={function(e) {
+          if (e.key === "Enter" && text.trim()) { onSave(text.trim()); setEditing(false); }
+          if (e.key === "Escape") { setText(value); setEditing(false); }
+        }}
+        style={Object.assign({}, style, { background: COLORS.bg, border: "1px solid " + COLORS.accent, borderRadius: 4, padding: "2px 6px", outline: "none", fontFamily: "inherit" })}
+      />
+    );
+  }
+
+  return (
+    <span onClick={function() { setEditing(true); }} style={Object.assign({}, style, { cursor: "pointer", borderBottom: "1px dashed " + COLORS.textDim })} title="Click to edit">
+      {value}
+    </span>
+  );
+}
+
+// ─── Main App ────────────────────────────────────────────────────────
+function ChordLibrary() {
+  const [data, setData] = useState(function() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch(e) {}
+    return {
+      players: [
+        {
+          id: "brian", name: "Brian",
+          songs: [{
+            id: "s1", name: "Sample Song",
+            sections: [
+              { id: "sec1", name: "Intro", chords: [
+                { name: "Am", frets: [-1,0,2,2,1,0], root: [null,0,null,null,null,null], startFret: 1 },
+                { name: "C", frets: [-1,3,2,0,1,0], root: [null,3,null,null,null,null], startFret: 1 },
+                { name: "G", frets: [3,2,0,0,0,3], root: [3,null,null,null,null,null], startFret: 1 },
+              ]},
+              { id: "sec2", name: "Verse", chords: [
+                { name: "Em", frets: [0,2,2,0,0,0], root: [0,null,null,null,null,null], startFret: 1 },
+                { name: "Cadd9", frets: [-1,3,2,0,3,0], root: [null,3,null,null,null,null], startFret: 1 },
+              ]},
+            ],
+          }],
+        },
+        { id: "jonathan", name: "Jonathan", songs: [] },
+      ],
+    };
+  });
+
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [selectedSong, setSelectedSong] = useState(null);
+  const [modal, setModal] = useState(null);
+  const fileInputRef = useRef(null);
+
+  useEffect(function() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) {}
+  }, [data]);
+
+  function exportData() {
+    var json = JSON.stringify(data, null, 2);
+    var blob = new Blob([json], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "chord-library-" + new Date().toISOString().slice(0, 10) + ".json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importData(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(evt) {
+      try {
+        var imported = JSON.parse(evt.target.result);
+        if (imported && imported.players) {
+          setData(imported);
+          setSelectedPlayer(null);
+          setSelectedSong(null);
+          alert("Imported successfully! " + imported.players.length + " player(s) loaded.");
+        } else {
+          alert("Invalid file format. Expected a chord library JSON file.");
+        }
+      } catch(err) {
+        alert("Could not read file. Make sure it's a valid chord library JSON.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  function uid() { return Math.random().toString(36).slice(2, 10); }
+  function getPlayer() { return data.players.find(function(p) { return p.id === selectedPlayer; }); }
+  function getSong() { var p = getPlayer(); return p ? p.songs.find(function(s) { return s.id === selectedSong; }) : null; }
+
+  function updatePlayers(fn) { setData(function(prev) { return { players: fn(prev.players) }; }); }
+
+  function addSong() {
+    updatePlayers(function(ps) { return ps.map(function(p) { return p.id === selectedPlayer ? Object.assign({}, p, { songs: p.songs.concat([{ id: uid(), name: "New Song", sections: [] }]) }) : p; }); });
+  }
+  function deleteSong(songId) {
+    updatePlayers(function(ps) { return ps.map(function(p) { return p.id === selectedPlayer ? Object.assign({}, p, { songs: p.songs.filter(function(s) { return s.id !== songId; }) }) : p; }); });
+    if (selectedSong === songId) setSelectedSong(null);
+  }
+  function renameSong(songId, newName) {
+    updatePlayers(function(ps) { return ps.map(function(p) { return p.id === selectedPlayer ? Object.assign({}, p, { songs: p.songs.map(function(s) { return s.id === songId ? Object.assign({}, s, { name: newName }) : s; }) }) : p; }); });
+  }
+  function addSection() {
+    updatePlayers(function(ps) { return ps.map(function(p) { return p.id === selectedPlayer ? Object.assign({}, p, { songs: p.songs.map(function(s) { return s.id === selectedSong ? Object.assign({}, s, { sections: s.sections.concat([{ id: uid(), name: "New Section", chords: [] }]) }) : s; }) }) : p; }); });
+  }
+  function deleteSection(sectionId) {
+    updatePlayers(function(ps) { return ps.map(function(p) { return p.id === selectedPlayer ? Object.assign({}, p, { songs: p.songs.map(function(s) { return s.id === selectedSong ? Object.assign({}, s, { sections: s.sections.filter(function(sec) { return sec.id !== sectionId; }) }) : s; }) }) : p; }); });
+  }
+  function renameSection(sectionId, newName) {
+    updatePlayers(function(ps) { return ps.map(function(p) { return p.id === selectedPlayer ? Object.assign({}, p, { songs: p.songs.map(function(s) { return s.id === selectedSong ? Object.assign({}, s, { sections: s.sections.map(function(sec) { return sec.id === sectionId ? Object.assign({}, sec, { name: newName }) : sec; }) }) : s; }) }) : p; }); });
+  }
+  function addChordToSection(sectionId, chord) {
+    updatePlayers(function(ps) { return ps.map(function(p) { return p.id === selectedPlayer ? Object.assign({}, p, { songs: p.songs.map(function(s) { return s.id === selectedSong ? Object.assign({}, s, { sections: s.sections.map(function(sec) { return sec.id === sectionId ? Object.assign({}, sec, { chords: sec.chords.concat([chord]) }) : sec; }) }) : s; }) }) : p; }); });
+    setModal(null);
+  }
+  function removeChordFromSection(sectionId, chordIdx) {
+    updatePlayers(function(ps) { return ps.map(function(p) { return p.id === selectedPlayer ? Object.assign({}, p, { songs: p.songs.map(function(s) { return s.id === selectedSong ? Object.assign({}, s, { sections: s.sections.map(function(sec) { return sec.id === sectionId ? Object.assign({}, sec, { chords: sec.chords.filter(function(_, i) { return i !== chordIdx; }) }) : sec; }) }) : s; }) }) : p; }); });
+  }
+  function addPlayer(name) {
+    updatePlayers(function(ps) { return ps.concat([{ id: uid(), name: name, songs: [] }]); });
+  }
+
+  const player = getPlayer();
+  const song = getSong();
+
+  return (
+    <div style={{ minHeight: "100vh", background: COLORS.bg, color: COLORS.text, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+      {/* Hidden file input for import */}
+      <input ref={fileInputRef} type="file" accept=".json" style={{ display: "none" }}
+        onChange={importData} />
+
+      {/* Header */}
+      <div className="header-bar" style={{ borderBottom: "1px solid " + COLORS.border, padding: "16px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+            <circle cx="14" cy="14" r="13" stroke={COLORS.accent} strokeWidth="2" />
+            <circle cx="14" cy="14" r="4" fill={COLORS.accent} />
+            <line x1="14" y1="1" x2="14" y2="10" stroke={COLORS.accent} strokeWidth="1.5" />
+            <line x1="14" y1="18" x2="14" y2="27" stroke={COLORS.accent} strokeWidth="1.5" />
+          </svg>
+          <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.3px", margin: 0 }}><span style={{ textTransform: "lowercase" }}>a</span>llsalt chord library</h1>
+
+          {/* Export / Import buttons */}
+          <div style={{ display: "flex", gap: 6, marginLeft: 8 }}>
+            <button onClick={exportData} title="Export chord data as JSON"
+              style={{ background: "transparent", border: "1px solid " + COLORS.border, color: COLORS.textMuted, padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap" }}
+              onMouseEnter={function(e) { e.currentTarget.style.borderColor = COLORS.accent; e.currentTarget.style.color = COLORS.accent; }}
+              onMouseLeave={function(e) { e.currentTarget.style.borderColor = COLORS.border; e.currentTarget.style.color = COLORS.textMuted; }}>
+              Export
+            </button>
+            <button onClick={function() { fileInputRef.current.click(); }} title="Import chord data from JSON"
+              style={{ background: "transparent", border: "1px solid " + COLORS.border, color: COLORS.textMuted, padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap" }}
+              onMouseEnter={function(e) { e.currentTarget.style.borderColor = COLORS.accent; e.currentTarget.style.color = COLORS.accent; }}
+              onMouseLeave={function(e) { e.currentTarget.style.borderColor = COLORS.border; e.currentTarget.style.color = COLORS.textMuted; }}>
+              Import
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: COLORS.textMuted }}>
+          <span onClick={function() { setSelectedPlayer(null); setSelectedSong(null); }}
+            style={{ cursor: "pointer", color: selectedPlayer ? COLORS.accent : COLORS.text, fontWeight: selectedPlayer ? 400 : 600 }}>
+            Players
+          </span>
+          {player && (
+            <React.Fragment>
+              <span style={{ color: COLORS.textDim }}>/</span>
+              <span onClick={function() { setSelectedSong(null); }}
+                style={{ cursor: "pointer", color: selectedSong ? COLORS.accent : COLORS.text, fontWeight: selectedSong ? 400 : 600 }}>
+                {player.name}
+              </span>
+            </React.Fragment>
+          )}
+          {song && (
+            <React.Fragment>
+              <span style={{ color: COLORS.textDim }}>/</span>
+              <span style={{ color: COLORS.text, fontWeight: 600 }}>{song.name}</span>
+            </React.Fragment>
+          )}
+        </div>
+      </div>
+
+      <div className="main-content" style={{ padding: "24px", maxWidth: 1100, margin: "0 auto" }}>
+
+        {/* Player Selection */}
+        {!selectedPlayer && (
+          <div>
+            <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 16, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "1px" }}>Select Player</h2>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              {data.players.map(function(p) {
+                return (
+                  <button key={p.id} className="player-btn" onClick={function() { setSelectedPlayer(p.id); }}
+                    style={{ background: COLORS.surface, border: "1px solid " + COLORS.border, borderRadius: 12, padding: "28px 48px", color: COLORS.text, fontSize: 22, fontWeight: 600, cursor: "pointer", transition: "all 0.15s", minWidth: 180 }}
+                    onMouseEnter={function(e) { e.currentTarget.style.borderColor = COLORS.accent; e.currentTarget.style.background = COLORS.surfaceHover; }}
+                    onMouseLeave={function(e) { e.currentTarget.style.borderColor = COLORS.border; e.currentTarget.style.background = COLORS.surface; }}>
+                    {p.name}
+                    <div style={{ fontSize: 12, fontWeight: 400, color: COLORS.textMuted, marginTop: 6 }}>
+                      {p.songs.length} song{p.songs.length !== 1 ? "s" : ""}
+                    </div>
+                  </button>
+                );
+              })}
+              <button className="player-btn" onClick={function() { var name = prompt("New player name:"); if (name && name.trim()) addPlayer(name.trim()); }}
+                style={{ background: "transparent", border: "2px dashed " + COLORS.border, borderRadius: 12, padding: "28px 48px", color: COLORS.textDim, fontSize: 18, cursor: "pointer", minWidth: 180, transition: "all 0.15s" }}
+                onMouseEnter={function(e) { e.currentTarget.style.borderColor = COLORS.accent; e.currentTarget.style.color = COLORS.accent; }}
+                onMouseLeave={function(e) { e.currentTarget.style.borderColor = COLORS.border; e.currentTarget.style.color = COLORS.textDim; }}>
+                + Add Player
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Song List */}
+        {selectedPlayer && !selectedSong && player && (
+          <div>
+            <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 16, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "1px" }}>{player.name}'s Songs</h2>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {player.songs.map(function(s) {
+                return (
+                  <div key={s.id}
+                    style={{ display: "flex", alignItems: "center", background: COLORS.surface, border: "1px solid " + COLORS.border, borderRadius: 8, padding: "14px 18px", cursor: "pointer", transition: "all 0.1s" }}
+                    onClick={function() { setSelectedSong(s.id); }}
+                    onMouseEnter={function(e) { e.currentTarget.style.borderColor = COLORS.accent; e.currentTarget.style.background = COLORS.surfaceHover; }}
+                    onMouseLeave={function(e) { e.currentTarget.style.borderColor = COLORS.border; e.currentTarget.style.background = COLORS.surface; }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: 16 }}>{s.name}</div>
+                      <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>
+                        {s.sections.length} section{s.sections.length !== 1 ? "s" : ""} &middot; {s.sections.reduce(function(n, sec) { return n + sec.chords.length; }, 0)} chords
+                      </div>
+                    </div>
+                    <button onClick={function(e) { e.stopPropagation(); if (confirm('Delete "' + s.name + '"?')) deleteSong(s.id); }}
+                      style={{ background: "transparent", border: "none", color: COLORS.textDim, fontSize: 18, cursor: "pointer", padding: "4px 8px" }}>
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+              <button onClick={addSong}
+                style={{ background: "transparent", border: "2px dashed " + COLORS.border, borderRadius: 8, padding: "14px 18px", color: COLORS.textDim, fontSize: 14, cursor: "pointer", textAlign: "left", transition: "all 0.15s" }}
+                onMouseEnter={function(e) { e.currentTarget.style.borderColor = COLORS.accent; e.currentTarget.style.color = COLORS.accent; }}
+                onMouseLeave={function(e) { e.currentTarget.style.borderColor = COLORS.border; e.currentTarget.style.color = COLORS.textDim; }}>
+                + Add Song
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Song Detail */}
+        {selectedSong && song && (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+              <EditableText value={song.name} onSave={function(v) { renameSong(song.id, v); }} style={{ fontSize: 24, fontWeight: 700, color: COLORS.text }} />
+            </div>
+
+            {song.sections.map(function(section) {
+              return (
+                <div key={section.id} className="section-card" style={{ background: COLORS.surface, border: "1px solid " + COLORS.border, borderRadius: 12, padding: 20, marginBottom: 16 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                    <EditableText value={section.name} onSave={function(v) { renameSection(section.id, v); }} style={{ fontSize: 16, fontWeight: 600, color: COLORS.accent }} />
+                    <button onClick={function() { if (confirm('Delete section "' + section.name + '"?')) deleteSection(section.id); }}
+                      style={{ background: "transparent", border: "none", color: COLORS.textDim, fontSize: 16, cursor: "pointer" }}>×</button>
+                  </div>
+
+                  <div className="chord-grid" style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "flex-start", minHeight: 60 }}>
+                    {section.chords.map(function(chord, ci) {
+                      return <ChordDiagram key={ci} name={chord.name} frets={chord.frets} root={chord.root} startFret={chord.startFret}
+                        onRemove={function() { removeChordFromSection(section.id, ci); }} />;
+                    })}
+                    {section.chords.length === 0 && (
+                      <div style={{ color: COLORS.textDim, fontSize: 13, padding: "20px 0" }}>No chords yet.</div>
+                    )}
+                  </div>
+
+                  <div style={{ marginTop: 14 }}>
+                    <button onClick={function() { setModal({ sectionId: section.id }); }}
+                      style={{
+                        background: COLORS.bg, border: "1px solid " + COLORS.border, color: COLORS.text,
+                        padding: "8px 16px", borderRadius: 6, fontSize: 13, cursor: "pointer", transition: "all 0.1s",
+                      }}
+                      onMouseEnter={function(e) { e.currentTarget.style.borderColor = COLORS.accent; }}
+                      onMouseLeave={function(e) { e.currentTarget.style.borderColor = COLORS.border; }}>
+                      + Add Chord
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            <button onClick={addSection}
+              style={{ background: "transparent", border: "2px dashed " + COLORS.border, borderRadius: 8, padding: "14px 18px", color: COLORS.textDim, fontSize: 14, cursor: "pointer", width: "100%", transition: "all 0.15s" }}
+              onMouseEnter={function(e) { e.currentTarget.style.borderColor = COLORS.accent; e.currentTarget.style.color = COLORS.accent; }}
+              onMouseLeave={function(e) { e.currentTarget.style.borderColor = COLORS.border; e.currentTarget.style.color = COLORS.textDim; }}>
+              + Add Section
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Add Chord Modal */}
+      {modal && (
+        <Modal onClose={function() { setModal(null); }}>
+          <FretboardEditor
+            onSave={function(chord) { addChordToSection(modal.sectionId, chord); }}
+            onCancel={function() { setModal(null); }}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.render(<ChordLibrary />, document.getElementById("root"));
+</script>
+</body>
+</html>
