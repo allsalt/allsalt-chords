@@ -435,11 +435,15 @@ function ChordLibrary() {
     updatePlayers(function(ps) { return ps.concat([{ id: uid(), name: name, songs: [] }]); });
   }
 
-  const player = getPlayer();
-  const song = getSong();
+  
 
   if (!data) {
     return (
+      ...loading screen...
+    );
+  }
+  const player = getPlayer();
+  const song = getSong();
       <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center", color: COLORS.textMuted }}>
           <div style={{ fontSize: 18, marginBottom: 8 }}>Loading chord library...</div>
