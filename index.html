@@ -186,86 +186,199 @@ function ChordDiagram({ name, frets, root, startFret = 1, size = "md", onRemove 
 
 // ─── Fretboard Editor ────────────────────────────────────────────────
 function FretboardEditor({ onSave, onCancel }) {
-  const [chordName, setChordName] = useState("Cmaj7");
+  const [frets, setFrets] = useState([-1,-1,-1,-1,-1,-1]);
+  const [rootFlags, setRootFlags] = useState([false,false,false,false,false,false]);
   const [startFret, setStartFret] = useState(1);
-  const [frets, setFrets] = useState([0, 3, 2, 0, 0, 0]);
-  const [root, setRoot] = useState([null, null, null, null, null, null]);
+  const [chordName, setChordName] = useState("");
+  const nameRef = useRef(null);
 
-  function toggleFret(stringIdx) {
-    var currentFret = frets[stringIdx];
-    var newFret;
-    if (currentFret === -1) {
-      newFret = 0;
-    } else if (currentFret === 0) {
-      newFret = startFret;
-    } else if (currentFret >= startFret && currentFret < startFret + NUM_FRETS_DISPLAY) {
-      newFret = currentFret + 1;
-    } else {
-      newFret = -1;
-    }
-    var newFrets = frets.slice();
-    newFrets[stringIdx] = newFret;
-    setFrets(newFrets);
+  useEffect(function() { if (nameRef.current) nameRef.current.focus(); }, []);
+
+  const W = 240, H = 280, padTop = 52, padBottom = 22, padLeft = 48, padRight = 20;
+  const fretCount = NUM_FRETS_DISPLAY, stringCount = 6;
+  const fretSpacing = (H - padTop - padBottom) / fretCount;
+  const stringSpacing = (W - padLeft - padRight) / (stringCount - 1);
+  const dotR = 12;
+  const isNut = startFret === 1;
+
+  const fretNumbers = [];
+  for (var i = 0; i < fretCount; i++) fretNumbers.push(startFret + i);
+
+  function handleFretClick(stringIdx, fretIdx) {
+    setFrets(function(prev) {
+      var next = prev.slice();
+      var actualFret = fretIdx + startFret;
+      next[stringIdx] = next[stringIdx] === actualFret ? -1 : actualFret;
+      return next;
+    });
+  }
+
+  function toggleOpen(stringIdx) {
+    setFrets(function(prev) {
+      var next = prev.slice();
+      next[stringIdx] = next[stringIdx] === 0 ? -1 : 0;
+      return next;
+    });
   }
 
   function toggleRoot(stringIdx) {
-    var newRoot = root.slice();
-    newRoot[stringIdx] = newRoot[stringIdx] !== null && newRoot[stringIdx] !== undefined ? null : frets[stringIdx];
-    setRoot(newRoot);
+    if (frets[stringIdx] === -1) return;
+    setRootFlags(function(prev) {
+      var next = prev.slice();
+      next[stringIdx] = !next[stringIdx];
+      return next;
+    });
   }
 
+  function buildRoot() {
+    return frets.map(function(f, i) { return (rootFlags[i] && f !== -1) ? f : null; });
+  }
+
+  function clearAll() {
+    setFrets([-1,-1,-1,-1,-1,-1]);
+    setRootFlags([false,false,false,false,false,false]);
+  }
+
+  var canSave = chordName.trim() && !frets.every(function(f) { return f === -1; });
+
   return (
-    <div className="editor-panel" style={{ background: COLORS.surface, borderRadius: 12, padding: 20, maxWidth: 500, margin: "0 auto" }}>
-      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, color: COLORS.text }}>Create Chord</h2>
-
-      <div className="editor-inputs" style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-        <input type="text" value={chordName} onChange={function(e) { setChordName(e.target.value); }} placeholder="Chord name (e.g., Cmaj7)"
-          style={{ flex: 1, minWidth: 180, background: COLORS.bg, border: "1px solid " + COLORS.border, color: COLORS.text, padding: "8px 12px", borderRadius: 6, outline: "none", fontSize: 14 }}
-          onFocus={function(e) { e.currentTarget.style.borderColor = COLORS.accent; }}
-          onBlur={function(e) { e.currentTarget.style.borderColor = COLORS.border; }}
-        />
-        <input type="number" value={startFret} onChange={function(e) { setStartFret(Math.max(1, parseInt(e.target.value) || 1)); }} placeholder="Start fret"
-          style={{ flex: 1, minWidth: 80, background: COLORS.bg, border: "1px solid " + COLORS.border, color: COLORS.text, padding: "8px 12px", borderRadius: 6, outline: "none", fontSize: 14 }}
-          onFocus={function(e) { e.currentTarget.style.borderColor = COLORS.accent; }}
-          onBlur={function(e) { e.currentTarget.style.borderColor = COLORS.border; }}
-        />
+    <div className="editor-panel" style={{
+      background: COLORS.surface, border: "1px solid " + COLORS.border, borderRadius: 12,
+      padding: 24, display: "flex", flexDirection: "column", alignItems: "center", gap: 16,
+    }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.text, alignSelf: "flex-start" }}>
+        Add Chord Shape
       </div>
 
-      <div style={{ background: COLORS.bg, padding: 16, borderRadius: 8, marginBottom: 16 }}>
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>Click strings to set frets (muted → open → frets → back to muted)</div>
-          <div style={{ display: "flex", gap: 6, justifyContent: "space-around" }}>
-            {[0, 1, 2, 3, 4, 5].map(function(si) {
-              var f = frets[si];
-              var fretDisplay = f === -1 ? "✕" : f === 0 ? "○" : f;
-              var isRoot = root[si] !== null && root[si] !== undefined;
-              return (
-                <div key={si} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                  <button onClick={function() { toggleFret(si); }}
-                    style={{ width: 36, height: 36, background: COLORS.surface, border: "2px solid " + (isRoot ? COLORS.root : f === 0 || f === -1 ? COLORS.border : COLORS.accent), borderRadius: 4, color: isRoot ? COLORS.root : COLORS.accent, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
-                    {fretDisplay}
-                  </button>
-                  <label style={{ fontSize: 11, color: COLORS.textMuted, cursor: "pointer", textAlign: "center" }}>
-                    <input type="checkbox" checked={isRoot} onChange={function() { toggleRoot(si); }} style={{ marginRight: 3, cursor: "pointer" }} />
-                    Root
-                  </label>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
-          <ChordDiagram name={chordName} frets={frets} root={root} startFret={startFret} size="md" onRemove={function() {}} />
+      <div className="editor-inputs" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", justifyContent: "center", width: "100%" }}>
+        <input ref={nameRef} type="text" placeholder="Chord name (e.g. Am7)"
+          value={chordName} onChange={function(e) { setChordName(e.target.value); }}
+          style={{
+            background: COLORS.bg, border: "1px solid " + COLORS.border, color: COLORS.text,
+            padding: "10px 14px", borderRadius: 8, fontSize: 15,
+            fontFamily: "'JetBrains Mono', monospace", flex: 1, minWidth: 160, outline: "none",
+          }}
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.bg, border: "1px solid " + COLORS.border, borderRadius: 8, padding: "6px 12px" }}>
+          <label style={{ color: COLORS.textMuted, fontSize: 12, whiteSpace: "nowrap" }}>Start fret</label>
+          <button onClick={function() { setStartFret(function(f) { return Math.max(1, f - 1); }); }}
+            style={{ background: "transparent", border: "1px solid " + COLORS.border, color: COLORS.text, width: 28, height: 28, borderRadius: 4, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            -
+          </button>
+          <span style={{ color: COLORS.accent, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 16, minWidth: 24, textAlign: "center" }}>
+            {startFret}
+          </span>
+          <button onClick={function() { setStartFret(function(f) { return Math.min(17, f + 1); }); }}
+            style={{ background: "transparent", border: "1px solid " + COLORS.border, color: COLORS.text, width: 28, height: 28, borderRadius: 4, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            +
+          </button>
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={function() { if (chordName.trim()) { onSave({ name: chordName.trim(), frets: frets, root: root, startFret: startFret }); setChordName(""); setFrets([0, 3, 2, 0, 0, 0]); setRoot([null, null, null, null, null, null]); setStartFret(1); } }}
-          style={{ flex: 1, background: COLORS.accent, border: "none", color: COLORS.bg, padding: "10px 16px", borderRadius: 6, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
-          Save Chord
+      <div style={{ color: COLORS.textMuted, fontSize: 11, textAlign: "center", lineHeight: 1.6 }}>
+        Tap a fret position to place/remove a finger. Tap above the nut to toggle open/muted.
+        <br />Right-click a dot to mark it as the <span style={{ color: COLORS.root, fontWeight: 600 }}>root</span>.
+      </div>
+
+      <svg width={W} height={H} style={{ cursor: "pointer" }}>
+        {STRING_LABELS.map(function(label, i) {
+          return <text key={"label-" + i} x={padLeft + i * stringSpacing} y={H - 4}
+            fill={COLORS.textDim} fontSize={10} fontFamily="'JetBrains Mono', monospace" textAnchor="middle">{label}</text>;
+        })}
+
+        {isNut ? (
+          <rect x={padLeft - 2} y={padTop - 5} width={stringSpacing * (stringCount - 1) + 4} height={5} fill={COLORS.nut} rx={1} />
+        ) : (
+          <text x={padLeft - 10} y={padTop + fretSpacing * 0.5}
+            fill={COLORS.accent} fontSize={13} fontWeight="700"
+            fontFamily="'JetBrains Mono', monospace" textAnchor="end" dominantBaseline="middle">
+            {startFret}
+          </text>
+        )}
+
+        {fretNumbers.map(function(fNum, i) {
+          return <text key={"fn-" + i} x={padLeft - 10} y={padTop + (i + 0.5) * fretSpacing}
+            fill={!isNut && i === 0 ? "transparent" : COLORS.textDim}
+            fontSize={10} fontFamily="'JetBrains Mono', monospace" textAnchor="end" dominantBaseline="middle">{fNum}</text>;
+        })}
+
+        {Array.from({ length: fretCount + 1 }).map(function(_, i) {
+          return <line key={"fret-" + i} x1={padLeft} y1={padTop + i * fretSpacing}
+            x2={padLeft + stringSpacing * (stringCount - 1)} y2={padTop + i * fretSpacing}
+            stroke={COLORS.fretWire} strokeWidth={1} />;
+        })}
+
+        {Array.from({ length: stringCount }).map(function(_, i) {
+          return <line key={"str-" + i} x1={padLeft + i * stringSpacing} y1={padTop}
+            x2={padLeft + i * stringSpacing} y2={padTop + fretCount * fretSpacing}
+            stroke={COLORS.string} strokeWidth={1 + (5 - i) * 0.2} />;
+        })}
+
+        {Array.from({ length: stringCount }).map(function(_, i) {
+          var x = padLeft + i * stringSpacing;
+          var y = padTop - 20;
+          return (
+            <g key={"top-" + i} onClick={function() { toggleOpen(i); }} style={{ cursor: "pointer" }}>
+              <rect x={x - 14} y={y - 14} width={28} height={28} fill="transparent" />
+              {frets[i] === 0 ? (
+                <circle cx={x} cy={y} r={9} fill="none" stroke={rootFlags[i] ? COLORS.root : COLORS.open} strokeWidth={2} />
+              ) : frets[i] === -1 ? (
+                <text x={x} y={y + 1} fill={COLORS.muted} fontSize={18} fontFamily="'JetBrains Mono', monospace" textAnchor="middle" dominantBaseline="middle">×</text>
+              ) : null}
+            </g>
+          );
+        })}
+
+        {Array.from({ length: fretCount }).map(function(_, fretIdx) {
+          return Array.from({ length: stringCount }).map(function(_, strIdx) {
+            var x = padLeft + strIdx * stringSpacing;
+            var y = padTop + (fretIdx + 0.5) * fretSpacing;
+            var actualFret = fretIdx + startFret;
+            var isActive = frets[strIdx] === actualFret;
+            var isRootDot = isActive && rootFlags[strIdx];
+            return (
+              <g key={"cell-" + fretIdx + "-" + strIdx}
+                onClick={function() { handleFretClick(strIdx, fretIdx); }}
+                onContextMenu={function(e) { e.preventDefault(); if (isActive) toggleRoot(strIdx); }}
+                style={{ cursor: "pointer" }}>
+                <rect x={x - stringSpacing / 2.2} y={y - fretSpacing / 2.2}
+                  width={stringSpacing / 1.1} height={fretSpacing / 1.1} fill="transparent" />
+                {isActive
+                  ? <circle cx={x} cy={y} r={dotR} fill={isRootDot ? COLORS.root : COLORS.dot} />
+                  : <circle cx={x} cy={y} r={5} fill={COLORS.fretWire} opacity={0.15} />
+                }
+              </g>
+            );
+          });
+        })}
+      </svg>
+
+      <div style={{ borderTop: "1px solid " + COLORS.border, paddingTop: 14, width: "100%" }}>
+        <div style={{ color: COLORS.textMuted, fontSize: 11, marginBottom: 8, textAlign: "center" }}>Preview</div>
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <ChordDiagram name={chordName || "?"} frets={frets} root={buildRoot()} startFret={startFret} />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+        <button
+          onClick={function() {
+            if (!canSave) return;
+            onSave({ name: chordName.trim(), frets: frets.slice(), root: buildRoot(), startFret: startFret });
+          }}
+          style={{
+            background: canSave ? COLORS.accent : COLORS.textDim,
+            color: COLORS.bg, border: "none", padding: "10px 24px", borderRadius: 8,
+            fontSize: 14, fontWeight: 600, cursor: canSave ? "pointer" : "not-allowed",
+          }}>
+          Add Chord
+        </button>
+        <button onClick={clearAll}
+          style={{ background: "transparent", color: COLORS.textMuted, border: "1px solid " + COLORS.border, padding: "10px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
+          Clear
         </button>
         <button onClick={onCancel}
-          style={{ flex: 1, background: "transparent", border: "1px solid " + COLORS.border, color: COLORS.text, padding: "10px 16px", borderRadius: 6, fontSize: 14, cursor: "pointer" }}>
+          style={{ background: "transparent", color: COLORS.textMuted, border: "1px solid " + COLORS.border, padding: "10px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
           Cancel
         </button>
       </div>
@@ -273,26 +386,30 @@ function FretboardEditor({ onSave, onCancel }) {
   );
 }
 
-// ─── Modal ──────────────────────────────────────────────────────────
+// ─── Modal Overlay ───────────────────────────────────────────────────
 function Modal({ children, onClose }) {
   return (
-    <div onClick={onClose} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div onClick={function(e) { e.stopPropagation(); }} style={{ position: "relative" }}>
+    <div onClick={onClose} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
+      <div onClick={function(e) { e.stopPropagation(); }} style={{ maxWidth: 500, width: "100%", maxHeight: "90vh", overflowY: "auto", borderRadius: 12 }}>
         {children}
       </div>
     </div>
   );
 }
 
-// ─── Editable Text ──────────────────────────────────────────────────
+// ─── Inline Editable Text ────────────────────────────────────────────
 function EditableText({ value, onSave, style }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(value);
+  const inputRef = useRef(null);
+
+  useEffect(function() { setText(value); }, [value]);
+  useEffect(function() { if (editing && inputRef.current) inputRef.current.focus(); }, [editing]);
 
   if (editing) {
     return (
-      <input autoFocus type="text" value={text} onChange={function(e) { setText(e.target.value); }}
-        onBlur={function() { if (text.trim() && text !== value) onSave(text.trim()); setText(value); setEditing(false); }}
+      <input ref={inputRef} value={text} onChange={function(e) { setText(e.target.value); }}
+        onBlur={function() { if (text.trim()) onSave(text.trim()); setEditing(false); }}
         onKeyDown={function(e) {
           if (e.key === "Enter" && text.trim()) { onSave(text.trim()); setEditing(false); }
           if (e.key === "Escape") { setText(value); setEditing(false); }
