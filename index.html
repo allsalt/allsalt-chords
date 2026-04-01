@@ -174,7 +174,7 @@ function ChordDiagram({ name, frets, root, startFret = 1, size = "md", onRemove 
       </svg>
 
       {/* Remove button */}
-      <button onClick={onRemove}
+      <button onClick={function(e) { e.stopPropagation(); onRemove(); }}
         style={{ background: "none", border: "none", color: COLORS.textDim, fontSize: 14, cursor: "pointer", marginTop: 4, padding: 0 }}
         onMouseEnter={function(e) { e.target.style.color = COLORS.accent; }}
         onMouseLeave={function(e) { e.target.style.color = COLORS.textDim; }}>
@@ -185,12 +185,13 @@ function ChordDiagram({ name, frets, root, startFret = 1, size = "md", onRemove 
 }
 
 // ─── Fretboard Editor ────────────────────────────────────────────────
-function FretboardEditor({ onSave, onCancel }) {
-  const [frets, setFrets] = useState([-1,-1,-1,-1,-1,-1]);
-  const [rootFlags, setRootFlags] = useState([false,false,false,false,false,false]);
-  const [startFret, setStartFret] = useState(1);
-  const [chordName, setChordName] = useState("");
+function FretboardEditor({ onSave, onCancel, initialChord }) {
+  const [frets, setFrets] = useState(initialChord ? initialChord.frets.slice() : [-1,-1,-1,-1,-1,-1]);
+  const [rootFlags, setRootFlags] = useState(initialChord ? initialChord.root.map(function(r) { return r !== null && r !== undefined; }) : [false,false,false,false,false,false]);
+  const [startFret, setStartFret] = useState(initialChord ? initialChord.startFret : 1);
+  const [chordName, setChordName] = useState(initialChord ? initialChord.name : "");
   const nameRef = useRef(null);
+  const isEditing = !!initialChord;
 
   useEffect(function() { if (nameRef.current) nameRef.current.focus(); }, []);
 
@@ -247,7 +248,7 @@ function FretboardEditor({ onSave, onCancel }) {
       padding: 24, display: "flex", flexDirection: "column", alignItems: "center", gap: 16,
     }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.text, alignSelf: "flex-start" }}>
-        Add Chord Shape
+        {isEditing ? "Edit Chord Shape" : "Add Chord Shape"}
       </div>
 
       <div className="editor-inputs" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", justifyContent: "center", width: "100%" }}>
@@ -371,7 +372,7 @@ function FretboardEditor({ onSave, onCancel }) {
             color: COLORS.bg, border: "none", padding: "10px 24px", borderRadius: 8,
             fontSize: 14, fontWeight: 600, cursor: canSave ? "pointer" : "not-allowed",
           }}>
-          Add Chord
+          {isEditing ? "Save Changes" : "Add Chord"}
         </button>
         <button onClick={clearAll}
           style={{ background: "transparent", color: COLORS.textMuted, border: "1px solid " + COLORS.border, padding: "10px 16px", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
@@ -435,6 +436,8 @@ function ChordLibrary() {
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [selectedSong, setSelectedSong] = useState(null);
   const [modal, setModal] = useState(null);
+  const dragItem = useRef(null);
+  const dragOverItem = useRef(null);
 
   // Real-time listener from Firestore
   useEffect(function() {
@@ -547,6 +550,20 @@ function ChordLibrary() {
   }
   function removeChordFromSection(sectionId, chordIdx) {
     updatePlayers(function(ps) { return ps.map(function(p) { return p.id === selectedPlayer ? Object.assign({}, p, { songs: p.songs.map(function(s) { return s.id === selectedSong ? Object.assign({}, s, { sections: s.sections.map(function(sec) { return sec.id === sectionId ? Object.assign({}, sec, { chords: sec.chords.filter(function(_, i) { return i !== chordIdx; }) }) : sec; }) }) : s; }) }) : p; }); });
+  }
+  function updateChordInSection(sectionId, chordIdx, chord) {
+    updatePlayers(function(ps) { return ps.map(function(p) { return p.id === selectedPlayer ? Object.assign({}, p, { songs: p.songs.map(function(s) { return s.id === selectedSong ? Object.assign({}, s, { sections: s.sections.map(function(sec) { return sec.id === sectionId ? Object.assign({}, sec, { chords: sec.chords.map(function(c, i) { return i === chordIdx ? chord : c; }) }) : sec; }) }) : s; }) }) : p; }); });
+    setModal(null);
+  }
+  function reorderChordsInSection(sectionId, fromIdx, toIdx) {
+    if (fromIdx === toIdx) return;
+    updatePlayers(function(ps) { return ps.map(function(p) { return p.id === selectedPlayer ? Object.assign({}, p, { songs: p.songs.map(function(s) { return s.id === selectedSong ? Object.assign({}, s, { sections: s.sections.map(function(sec) {
+      if (sec.id !== sectionId) return sec;
+      var chords = sec.chords.slice();
+      var item = chords.splice(fromIdx, 1)[0];
+      chords.splice(toIdx, 0, item);
+      return Object.assign({}, sec, { chords: chords });
+    }) }) : s; }) }) : p; }); });
   }
   function addPlayer(name) {
     updatePlayers(function(ps) { return ps.concat([{ id: uid(), name: name, songs: [] }]); });
@@ -698,8 +715,21 @@ function ChordLibrary() {
 
                   <div className="chord-grid" style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "flex-start", minHeight: 60 }}>
                     {section.chords.map(function(chord, ci) {
-                      return <ChordDiagram key={ci} name={chord.name} frets={chord.frets} root={chord.root} startFret={chord.startFret}
-                        onRemove={function() { removeChordFromSection(section.id, ci); }} />;
+                      return (
+                        <div key={ci} draggable="true"
+                          onDragStart={function(e) { dragItem.current = { sectionId: section.id, idx: ci }; e.dataTransfer.effectAllowed = "move"; e.currentTarget.style.opacity = "0.4"; }}
+                          onDragEnd={function(e) { e.currentTarget.style.opacity = "1"; dragItem.current = null; dragOverItem.current = null; }}
+                          onDragOver={function(e) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+                          onDragEnter={function(e) { e.preventDefault(); dragOverItem.current = { sectionId: section.id, idx: ci }; e.currentTarget.style.borderLeft = "3px solid " + COLORS.accent; }}
+                          onDragLeave={function(e) { e.currentTarget.style.borderLeft = "3px solid transparent"; }}
+                          onDrop={function(e) { e.preventDefault(); e.currentTarget.style.borderLeft = "3px solid transparent"; if (dragItem.current && dragItem.current.sectionId === section.id) { reorderChordsInSection(section.id, dragItem.current.idx, ci); } }}
+                          onClick={function() { setModal({ sectionId: section.id, editIdx: ci, chord: chord }); }}
+                          style={{ cursor: "grab", borderLeft: "3px solid transparent", borderRadius: 4 }}
+                          title="Click to edit, drag to reorder">
+                          <ChordDiagram name={chord.name} frets={chord.frets} root={chord.root} startFret={chord.startFret}
+                            onRemove={function() { removeChordFromSection(section.id, ci); }} />
+                        </div>
+                      );
                     })}
                     {section.chords.length === 0 && (
                       <div style={{ color: COLORS.textDim, fontSize: 13, padding: "20px 0" }}>No chords yet.</div>
@@ -731,11 +761,18 @@ function ChordLibrary() {
         )}
       </div>
 
-      {/* Add Chord Modal */}
+      {/* Add/Edit Chord Modal */}
       {modal && (
         <Modal onClose={function() { setModal(null); }}>
           <FretboardEditor
-            onSave={function(chord) { addChordToSection(modal.sectionId, chord); }}
+            initialChord={modal.chord || null}
+            onSave={function(chord) {
+              if (modal.editIdx !== undefined && modal.editIdx !== null) {
+                updateChordInSection(modal.sectionId, modal.editIdx, chord);
+              } else {
+                addChordToSection(modal.sectionId, chord);
+              }
+            }}
             onCancel={function() { setModal(null); }}
           />
         </Modal>
